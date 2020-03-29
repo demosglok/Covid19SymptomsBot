@@ -1,6 +1,6 @@
 {
     "appSecret": "9f874f1c3ac86565a7b9faa0ac19ffe9",
     "pageAccessToken": "EAAIkJNu4K74BAHjV9fluEqWXtCOTOadn8pkyrBzfYAEZC3zdcJFSHiqvoP5gK0hOZBCGQbsaXZBcW7plZAjuZB1ijOFtVYaNR0MFAllKwadvB1UHR2x7XQpwxZCghx3unaDvUTL73OI1llGIVLCNM5U7ouTFZAaHIVPyEZBT17DFdyjFwn4fcAti4hkHkfMjZAYAZD",
-    "validationToken": "TOKEN",
-    "serverURL": "to_be_set_manually"
+    "validationToken": "SUPER_TOKEN",
+    "serverURL": "https://covid19symptoms.online/bot/"
 }
