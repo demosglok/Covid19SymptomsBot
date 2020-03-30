@@ -379,14 +379,15 @@ function sendHiMessage(recipientId) {
     },
     message: {
       text: `
-hello, I’m covid19 symptoms bot. My aim is to help scientist and researches get better picture of untested and invisible covid19 cases. 
+hello, I’m covid19 symptoms bot. My aim is to help scientist and researches get better picture of untested and invisible covid19 cases. \n
 I will ask 7 simple questions every day if you agree to have this info collected. It’ll take less then 2 minutes for you but will help a lot 
 in global scale. None of your personal information will be shared. Only anonymised  and aggregated data will be available to verified 
-researchers. You can check my source code here https://github.com/demosglok/Covid19SymptomsBot. 
-You can get more info on this page. https://covid19symptopms.online/info. 
-Why it is important ttps://covid19symptopms.online/important.
-You can stop regular questions at any time. 
-Possible commands for bot are "hi" - this message, "askme" - ask set of questions, "stop" - to stop regular asking, "deleteme" - delete all my data forever
+researchers.\n You can check my source code here https://github.com/demosglok/Covid19SymptomsBot. \n
+You can get more info on this page. https://covid19symptoms.online/info.html \n
+Why it is important ttps://covid19symptoms.online/important.html\n
+You can stop regular questions at any time. \n\n
+Possible commands for bot are \n"hi" - this message, \n"askme" - ask set of questions,
+"stop" - to stop regular asking, \n"deleteme" - delete all my data forever
       `
     }
   }
@@ -535,6 +536,9 @@ function callSendAPI(messageData) {
   });
 }
 
+setTimeout(() => {
+sendTextMessage('2782936258454619', 'delayed message');
+}, 3000);
 // Start server
 // Webhooks must be available via SSL with a certificate signed by a valid
 // certificate authority.
