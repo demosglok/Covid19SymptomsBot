@@ -18,11 +18,25 @@ const
   https = require('https'),
   request = require('request');
 
-var app = express();
+const app = express();
 app.set('port', process.env.PORT || 9003);
 app.set('view engine', 'ejs');
 app.use(bodyParser.json({ verify: verifyRequestSignature }));
 app.use(express.static('public'));
+
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./config/firebase.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://covid19symptomsbot.firebaseio.com"
+});
+const db = admin.firestore();
+const peopleDB = db.collection('people');
+const answersDB = db.collection('answers');
+
 
 /*
  * Be sure to setup your config values before running this code. You can
@@ -201,6 +215,17 @@ function receivedAuthentication(event) {
   sendTextMessage(senderID, "Authentication successful");
 }
 
+function createUser(id, time) {
+    const doc = peopleDB.doc(id);
+    doc.get().then(foundDocument => {
+	if(foundDocument.exist) {
+	    doc.update({last_question_time: time}).catch(err => console.log('error updating', err.message));
+	}
+	else {
+	    doc.set({last_question_time: time}).catch(err => console.log('error setting', err.message));
+	}
+    }).catch(err => console.log(`error querying document ${id}`, err.message));
+}
 /*
  * Message Event
  *
@@ -257,6 +282,7 @@ function receivedMessage(event) {
     switch (messageText.replace(/[^\w\s]/gi, '').trim().toLowerCase()) {
       case 'hello':
       case 'hi':
+        createUser(senderID, 0);
         sendHiMessage(senderID);
         break;
 
@@ -537,7 +563,14 @@ function callSendAPI(messageData) {
 }
 
 setTimeout(() => {
-sendTextMessage('2782936258454619', 'delayed message');
+    peopleDB.where('last_question_time', '<', Date.now()/1000-24*60*60).get()
+	.then((snapshot) => {
+	    snapshot.forEach((doc) => {
+		sendTextMessage(doc.id, 'Do you agree to be questioned regularly');
+	    });
+	})
+	.catch(err => console.log('db error', err.message));
+    //sendTextMessage('2782936258454619', 'delayed message');
 }, 3000);
 // Start server
 // Webhooks must be available via SSL with a certificate signed by a valid
