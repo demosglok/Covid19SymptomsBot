@@ -15,7 +15,7 @@ const
   config = require('config'),
   crypto = require('crypto'),
   express = require('express'),
-  https = require('https'),
+//  https = require('https'),
   request = require('request');
 
 const app = express();
@@ -37,6 +37,8 @@ const db = admin.firestore();
 const peopleDB = db.collection('people');
 const answersDB = db.collection('answers');
 
+const questions = require('./questions');
+let currentQuestionsState = {};
 
 /*
  * Be sure to setup your config values before running this code. You can
@@ -215,17 +217,6 @@ function receivedAuthentication(event) {
   sendTextMessage(senderID, "Authentication successful");
 }
 
-function createUser(id, time) {
-    const doc = peopleDB.doc(id);
-    doc.get().then(foundDocument => {
-	if(foundDocument.exist) {
-	    doc.update({last_question_time: time}).catch(err => console.log('error updating', err.message));
-	}
-	else {
-	    doc.set({last_question_time: time}).catch(err => console.log('error setting', err.message));
-	}
-    }).catch(err => console.log(`error querying document ${id}`, err.message));
-}
 /*
  * Message Event
  *
@@ -269,9 +260,13 @@ function receivedMessage(event) {
     var quickReplyPayload = quickReply.payload;
     console.log("Quick reply for message %s with payload %s",
       messageId, quickReplyPayload);
-    // TODO store reply, go to next step
-    sendTextMessage(senderID, "Quick reply tapped");
+    processAnswer(senderID, quickReplyPayload);
+
     return;
+  } else if(metadata == 'QUESTION_CITY') {
+    addQuestionAnswerToLocalStore(senderID, messageText);
+    stopQuestionsIfNoMore(senderID);
+    sendTextMessage(senderID, "Thank you for answering. This is important. See you tomorrow.");
   }
 
   if (messageText) {
@@ -282,10 +277,17 @@ function receivedMessage(event) {
     switch (messageText.replace(/[^\w\s]/gi, '').trim().toLowerCase()) {
       case 'hello':
       case 'hi':
-        createUser(senderID, 0);
+        createUser(senderID);
         sendHiMessage(senderID);
+        askForAgreement(senderID);
         break;
-
+      case 'stop':
+        updateUser(senderID, {agree: false});
+        sendTextMessage(senderID, "Thanks for interest in bot. Once you're ready to start be questioned again, just type 'hi'");
+        break;
+      case "askme": 
+        questionUser(senderID);
+        break;
       case 'receipt':
         requiresServerURL(sendReceiptMessage, [senderID]);
         break;
@@ -397,6 +399,22 @@ function receivedAccountLink(event) {
     "and auth code %s ", senderID, status, authCode);
 }
 
+function createUser(id) {
+  const doc = peopleDB.doc(id);
+  doc.get().then(foundDocument => {
+    if(!foundDocument.exist) {
+      doc.set({last_question_time: 0}).catch(err => console.log('error setting', err.message));
+    }
+  }).catch(err => console.log(`error querying document ${id}`, err.message));
+}
+function updateUser(id, updateData) {
+  const doc = peopleDB.doc(id);
+  doc.get().then(foundDocument => {
+    if(foundDocument.exist) {
+      doc.update(updateData).catch(err => console.log('error updating', err.message));
+    }
+  }).catch(err => console.log(`error querying document ${id}`, err.message));
+}
 
 function sendHiMessage(recipientId) {
   var messageData = {
@@ -421,6 +439,124 @@ Possible commands for bot are \n"hi" - this message, \n"askme" - ask set of ques
   callSendAPI(messageData);
 }
 
+function askForAgreement(recipientId)  {
+  var messageData = {
+    recipient: {
+      id: recipientId
+    },
+    message: {
+      text: "Do you agree to be questioned regularly? (you can cancel any time)",
+      quick_replies: [
+        {
+          "content_type":"text",
+          "title":"Yes",
+          "payload":"AGREE_TO_BE_QUESTIONED"
+        },
+        {
+          "content_type":"text",
+          "title":"No",
+          "payload":"DISAGREE_TO_BE_QUESTIONED"
+        },
+      ]
+    }
+  };
+
+  callSendAPI(messageData);
+
+}
+function processAnswer(senderID, quickReplyPayload) {
+  switch(quickReplyPayload) {
+    case 'AGREE_TO_BE_QUESTIONED':
+      updateUser(senderID, {agree: true});
+      questionUser(senderID);
+      break;
+    case 'DISAGREE_TO_BE_QUESTIONED':
+      updateUser(senderID, {agree: false});
+      sendTextMessage(senderID, 'Thanks for interest in this BOT and COVID19 response. If you change your mind, the bot is always happy and start questioning');
+      break;
+    case 'START_QUESTIONING_OK':
+      currentQuestionsState[senderID] = {step: 0, answers: {}};
+      askHealthQuestion(senderID);
+      break;
+    case 'QUESTIONING_NOTHING_CHANGE':
+      updateUser(senderID, {last_question_time: parseInt(Date.now() / 1000)})
+      break;
+    case 'QUESTIONING_SKIP_TODAY':
+      updateUser(senderID, {last_question_time: parseInt(Date.now() / 1000)})
+      break;
+    case 'HEALTH_ANSWER_YES':
+      addQuestionAnswerToLocalStore(senderID, 'yes');
+      if(currentQuestionsState[senderID].step < questions.length) {
+        askHealthQuestion(senderID);
+      } else {
+        stopQuestionsIfNoMore(senderID);
+        sendTextMessage(senderID, "Thank you for answering. This is important. See you tomorrow.");
+      }
+      break;
+    case 'HEALTH_ANSWER_NO':
+      addQuestionAnswerToLocalStore(senderID, 'no');
+      if(currentQuestionsState[senderID].step < questions.length) {
+        askHealthQuestion(senderID);
+      } else {
+        stopQuestionsIfNoMore(senderID);
+        sendTextMessage(senderID, "Thank you for answering. This is important. See you tomorrow.");
+      }
+      break;
+    case 'HEALTH_ANSWER_NOT_SURE':
+      addQuestionAnswerToLocalStore(senderID, 'not sure');
+      if(currentQuestionsState[senderID].step < questions.length) {
+        askHealthQuestion(senderID);
+      } else {
+        stopQuestionsIfNoMore(senderID);
+        sendTextMessage(senderID, "Thank you for answering. This is important. See you tomorrow.");
+      }
+      break;
+  }
+}
+
+function askHealthQuestion(recipientId) {
+  const step = currentQuestionsState[recipientId].step;
+  if(step != undefined && questions[step]) {
+    const question = questions[step];
+    const messageData = {
+      recipient: {
+        id: recipientId
+      },
+      message: {
+        text: question.text,
+      }
+    };
+
+    if(question.fieldname == 'city') {
+      messageData.message.metadata = "QUESTION_CITY";
+    } else {
+      messageData.message.quick_replies = [
+        {"content_type":"text", "title":"YES","payload":"HEALTH_ANSWER_YES"},
+        {"content_type":"text", "title":"NO","payload":"HEALTH_ANSWER_NO"},
+        {"content_type":"text", "title":"Not sure","payload":"HEALTH_ANSWER_NOT_SURE"},
+      ];      
+    }
+
+    callSendAPI(messageData);
+  }
+}
+function addQuestionAnswerToLocalStore(recipientId, answer) {
+  const step = currentQuestionsState[recipientId].step;
+  if(step != undefined && questions[step]) {
+    const question = questions[step];
+    currentQuestionsState[recipientId].answers[question.fieldname] = answer;
+    currentQuestionsState[recipientId].step++;
+  }
+}
+function stopQuestionsIfNoMore(recipientId) {
+  const step = currentQuestionsState[recipientId].step;
+  if(step != undefined && questions[step]) {
+    const answers = currentQuestionsState[recipientId].answers;
+    answersDB.doc(recipientId).set({...answers, timestamp: parseInt(Date.now() / 1000)}).catch(err => console.log('err saving answers', err.message));
+    updateUser(senderID, {last_question_time: parseInt(Date.now() / 1000)});
+    delete currentQuestionsState[recipientId];
+  }
+}
 
 /*
  * Send a text message using the Send API.
@@ -440,44 +576,28 @@ function sendTextMessage(recipientId, messageText) {
   callSendAPI(messageData);
 }
 
-/*
- * Send a button message using the Send API.
- *
- */
-function sendButtonMessage(recipientId) {
+function askToStartQuestioning(recipientId, keepPreviousOption) {
+  const text = keepPreviousOption 
+        ? "Hello, I'll ask 7 questions about your health now. If nothing changed, select 'Nothing change', otherwise press OK"
+        : "Hello, I'll ask 7 questions about your health now. If you want to skip, select 'Skip today', otherwise press OK";
+  const quick_replies = [{"content_type":"text", "title":"OK","payload":"START_QUESTIONING_OK"}];
+  if(keepPreviousOption) {
+    quick_replies.push({"content_type":"text", "title":"Nothing change","payload":"QUESTIONING_NOTHING_CHAGE"});
+  } else {
+    quick_replies.push({"content_type":"text", "title":"Skip today","payload":"QUESTIONING_SKIP_TODAY"});
+  }
   var messageData = {
     recipient: {
       id: recipientId
     },
     message: {
-      attachment: {
-        type: "template",
-        payload: {
-          template_type: "button",
-          text: "This is test text",
-          buttons:[{
-            type: "web_url",
-            url: "https://www.oculus.com/en-us/rift/",
-            title: "Open Web URL"
-          }, {
-            type: "postback",
-            title: "Trigger Postback",
-            payload: "DEVELOPER_DEFINED_PAYLOAD"
-          }, {
-            type: "phone_number",
-            title: "Call Phone Number",
-            payload: "+16505551234"
-          }]
-        }
-      }
+      text,
+      quick_replies
     }
   };
 
   callSendAPI(messageData);
 }
-
-
-
 
 /*
  * Send a message with Quick Reply buttons.
@@ -562,16 +682,22 @@ function callSendAPI(messageData) {
   });
 }
 
+function questionUser(userID) {
+  answersDB.doc(userId).get().then(doc => {
+    const keepPreviousOption = doc.exists;
+    askToStartQuestioning(userID, keepPreviousOption);
+  }).catch(err => console.log('error querying answer for', userID, err.message));
+}
 setTimeout(() => {
-    peopleDB.where('last_question_time', '<', Date.now()/1000-24*60*60).get()
-	.then((snapshot) => {
+  peopleDB.where('last_question_time', '<', Date.now()/1000-24*60*60).get()
+	  .then((snapshot) => {
 	    snapshot.forEach((doc) => {
-		sendTextMessage(doc.id, 'Do you agree to be questioned regularly');
+        askToStartQuestioning(userID, true);
 	    });
-	})
-	.catch(err => console.log('db error', err.message));
+	  })
+	  .catch(err => console.log('db error', err.message));
     //sendTextMessage('2782936258454619', 'delayed message');
-}, 3000);
+}, 3000000000);
 // Start server
 // Webhooks must be available via SSL with a certificate signed by a valid
 // certificate authority.
