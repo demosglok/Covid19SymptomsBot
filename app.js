@@ -263,13 +263,15 @@ function receivedMessage(event) {
     processAnswer(senderID, quickReplyPayload);
 
     return;
-  } else if(metadata == 'QUESTION_CITY') {
+  } else if(metadata == 'QUESTION_CITY' || 
+	(currentQuestionsState[senderID] 
+	    && questions[currentQuestionsState[senderID].step]
+	    && questions[currentQuestionsState[senderID].step].fieldname == 'city'
+	)) {
     addQuestionAnswerToLocalStore(senderID, messageText);
     stopQuestionsIfNoMore(senderID);
     sendTextMessage(senderID, "Thank you for answering. This is important. See you tomorrow.");
-  }
-
-  if (messageText) {
+  } else if (messageText) {
 
     // If we receive a text message, check to see if it matches any special
     // keywords and send back the corresponding example. Otherwise, just echo
@@ -278,8 +280,7 @@ function receivedMessage(event) {
       case 'hello':
       case 'hi':
         createUser(senderID);
-        sendHiMessage(senderID);
-        askForAgreement(senderID);
+        sendHiMessage(senderID).then(() => askForAgreement(senderID));
         break;
       case 'stop':
         updateUser(senderID, {agree: false});
@@ -303,7 +304,7 @@ function receivedMessage(event) {
 
 
       default:
-        sendTextMessage(senderID, messageText);
+        sendTextMessage(senderID, "sorry, i don't understand usual speech for now, you can use commands 'hi' to restart, 'stop' - to stop questioning, 'askme' - to fire immediate questioning");
     }
   } else if (messageAttachments) {
     sendTextMessage(senderID, "Message with attachment received");
@@ -436,7 +437,7 @@ Possible commands for bot are \n"hi" - this message, \n"askme" - ask set of ques
     }
   }
 
-  callSendAPI(messageData);
+  return callSendAPI(messageData);
 }
 
 function askForAgreement(recipientId)  {
@@ -658,6 +659,7 @@ function sendReadReceipt(recipientId) {
  *
  */
 function callSendAPI(messageData) {
+    return new Promise((resolve, reject) => 
   request({
     uri: 'https://graph.facebook.com/v2.6/me/messages',
     qs: { access_token: PAGE_ACCESS_TOKEN },
@@ -672,18 +674,21 @@ function callSendAPI(messageData) {
       if (messageId) {
         console.log("Successfully sent message with id %s to recipient %s",
           messageId, recipientId);
+	resolve(response.statusCode);
       } else {
       console.log("Successfully called Send API for recipient %s",
         recipientId);
+	resolve(response.statusCode);
       }
     } else {
       console.error("Failed calling Send API", response.statusCode, response.statusMessage, body.error);
+	reject({status: response.statusCode, error: body.error});
     }
-  });
+  }));
 }
 
 function questionUser(userID) {
-  answersDB.doc(userId).get().then(doc => {
+  answersDB.doc(userID).get().then(doc => {
     const keepPreviousOption = doc.exists;
     askToStartQuestioning(userID, keepPreviousOption);
   }).catch(err => console.log('error querying answer for', userID, err.message));
@@ -692,12 +697,12 @@ setTimeout(() => {
   peopleDB.where('last_question_time', '<', Date.now()/1000-24*60*60).get()
 	  .then((snapshot) => {
 	    snapshot.forEach((doc) => {
-        askToStartQuestioning(userID, true);
+        askToStartQuestioning(doc.id, true);
 	    });
 	  })
 	  .catch(err => console.log('db error', err.message));
     //sendTextMessage('2782936258454619', 'delayed message');
-}, 3000000000);
+}, 30000000);
 // Start server
 // Webhooks must be available via SSL with a certificate signed by a valid
 // certificate authority.
